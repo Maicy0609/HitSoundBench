@@ -7,7 +7,11 @@ on:
     inputs:
       runs:
         description: '每个工具重复跑几次（取最快一次做产物，其余只留指标）'
-        default: '3'
+        default: '2'
+        required: false
+      levels:
+        description: '关卡，逗号分隔：tempest（上游样例）、level（仓库里的 level.zip，运行时才解压）'
+        default: 'tempest,level'
         required: false
       adocao_ref:
         description: 'ADOCAO 提交/分支（留空 = 默认分支）'
@@ -30,7 +34,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -45,14 +49,15 @@ jobs:
       - name: 安装分析依赖
         run: python -m pip install --quiet --disable-pip-version-check numpy matplotlib
 
-      - name: 跑基准（剥离 → 构建 → 跑 → 分析）
+      - name: 跑基准（剥离 → 构建 → 逐关卡跑 → 分析 → 汇总）
         shell: bash
         env:
           PY: python
           # Windows 的 Python 默认用 cp1252 打印，脚本里的中文会 UnicodeEncodeError
           PYTHONUTF8: '1'
           PYTHONIOENCODING: utf-8
-          RUNS: ${{ inputs.runs || '3' }}
+          RUNS: ${{ inputs.runs || '2' }}
+          LEVELS: ${{ inputs.levels || 'tempest,level' }}
           LABEL: ${{ matrix.os }}
           ADOCAO_REF: ${{ inputs.adocao_ref }}
           HITSOUND_REF: ${{ inputs.hitsound_ref }}
@@ -62,21 +67,28 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [ -f out/report.md ]; then cat out/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+          for f in out/summary.md out/*/report.md; do
+            [ -f "$f" ] && { echo; echo "<!-- $f -->"; cat "$f"; echo; }
+          done >> "$GITHUB_STEP_SUMMARY" || true
 
-      - name: 上传音频（两个工具的输出 + A/B 片段）
+      - name: 空间检查（巨型关卡的产物可能很大，先看清楚）
+        if: always()
+        shell: bash
+        run: du -sh out/* 2>/dev/null | sort -h || true
+
+      - name: 上传音频（每个关卡：两侧完整输出 + A/B 片段）
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: audio-${{ matrix.os }}
           retention-days: 30
           path: |
-            out/adocao.wav
-            out/ref.wav
-            out/ab_sparse.wav
-            out/ab_dense.wav
-            out/ab_sparse_raw.wav
-            out/ab_dense_raw.wav
+            out/*/adocao.wav
+            out/*/ref.wav
+            out/*/ab_sparse.wav
+            out/*/ab_dense.wav
+            out/*/ab_sparse_raw.wav
+            out/*/ab_dense_raw.wav
 
       - name: 上传报告（速度/内存/时间轴/响度/图表/原始日志）
         if: always()
@@ -85,11 +97,12 @@ jobs:
           name: report-${{ matrix.os }}
           retention-days: 30
           path: |
-            out/report.md
-            out/report.json
-            out/compare.png
-            out/metrics_*.txt
-            out/timeline_*.txt
-            out/log_*.txt
+            out/summary.md
+            out/*/report.md
+            out/*/report.json
+            out/*/compare.png
+            out/*/metrics_*.txt
+            out/*/timeline_*.f64.gz
+            out/*/log_*.txt
             out/PROVENANCE.txt
             out/env.txt

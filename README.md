@@ -5,7 +5,10 @@
 
 - 被测 A：**ADOCAO** 的 `core/timeline` + `audio/HitsoundManager`（16-bit 逐样本硬削波）
 - 被测 B：**ADOFAI_HitSound** 的 `HitSound.cpp`（奈奎斯特过滤 + 静态等功率预缩放）
-- 测试谱面：`Tempest.adofai` —— 158,403 tiles / 158,402 hits / 最大同时发声 879
+- 测试谱面（`LEVELS` 可选，逗号分隔）：
+  - `tempest` —— 上游 ADOFAI_HitSound 仓库的 `x64/Release/Tempest.adofai`（158,403 tiles）
+  - `level` —— 本仓库 `levels/level.zip` 里的 `level.adofai`（**压缩包 15.7 MB，解压后 315 MB**，
+    所以压缩包原样提交、**只在跑的时候解压**，解压产物不进版本库）
 - 打击音：**两侧都用 ADOFAI_HitSound 仓库里那唯一的 `hit.wav`**（48 kHz / 16-bit / 11,101 帧）
 
 代码不做副本：`extract/` 每次从上游仓库现取现剥离（ADOCAO 逐字复制、`HitSound.cpp` 由脚本
@@ -143,3 +146,18 @@ scripts/          run_bench.sh（本地与 CI 共用的唯一编排入口）
 - **音频**：ADR 方案（ADOCO）的密集段是硬削波饱和，ref 是常数增益 + 峰值安全余量。
   报告第 4 节给出各自的削波比例、包络动态范围，`ab_*.wav` 可以直接听出来。
 - 想让两者响度真正可比，请用 `ab_*.wav`（增益对齐版），不要用两个 `*.wav` 直接对放。
+
+## 关卡来源与解压
+
+`LEVELS` 里 `level` 指向的 `levels/level.zip`（15.7 MB）**原样提交**，里面是一个解压后
+315 MB 的 `level.adofai`；解压只发生在跑基准的时候（`scripts/run_bench.sh` 里的
+`python -m zipfile -e`），解压产物落在 `build/levels/`，既不进版本库也不进产物。
+`LEVEL_ZIP=<别的 zip>` 可以临时换成其它关卡包。
+
+巨型关卡对分析侧的压力（几千万 hit、上 GB 波形）在实现上已经处理：
+
+- hit 时间轴导出成**二进制 float64**（`.f64`，跑完立刻 gzip），不写成文本
+- 同时发声密度用 `bincount` 差分，而不是 `np.add.at`（后者在千万级 hit 上慢一到两个数量级）
+- 能量前缀和只算一次并被多处指标复用；A/B 稀疏段用包络上向量化地找"最安静的 10 s"，
+  不存在按 hit 的 Python 循环
+- 只保留最快一次的时间轴与 WAV（其余几次的 WAV 分析后即删），避免产物被撑爆

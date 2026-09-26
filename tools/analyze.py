@@ -38,31 +38,59 @@ def read_kv(path):
 
 
 def pick_fastest(out_dir, tool):
-    """在 metrics_<tool>.run<N>.txt 里挑 total_ms 最小的一次，并把它固化为 <tool>.wav。"""
+    """在 metrics_<tool>.run<N>.txt 里挑 total_ms 最小的一次，把它固化为 <tool>.wav。
+
+    同时清掉其余几次的 WAV：巨型关卡单个 WAV 可达数百 MB，留着会把产物撑爆。
+    时间轴统一带扩展名复制（.txt 或 .txt.gz 原样保留），分析侧两种都能读。
+    """
     runs = sorted(out_dir.glob(f"metrics_{tool}.run*.txt"))
     if not runs:
         sys.exit(f"[analyze] 找不到 {out_dir}/metrics_{tool}.run*.txt")
     best = min(runs, key=lambda p: read_kv(p).get("total_ms", float("inf")))
     run_id = re.search(r"run(\d+)", best.name).group(1)
+
     shutil.copy(best, out_dir / f"metrics_{tool}.txt")
-    shutil.copy(out_dir / f"{tool}.run{run_id}.wav", out_dir / f"{tool}.wav")
-    shutil.copy(out_dir / f"timeline_{tool}.run{run_id}.txt", out_dir / f"timeline_{tool}.txt")
+    wav_src = out_dir / f"{tool}.run{run_id}.wav"
+    shutil.copy(wav_src, out_dir / f"{tool}.wav")
+    for p in out_dir.glob(f"{tool}.run*.wav"):
+        p.unlink()
+
+    timelines = sorted(out_dir.glob(f"timeline_{tool}.run{run_id}.*"))
+    if timelines:
+        # 从 "timeline_adocao.run1.f64.gz" 里取出 ".f64.gz" 作为规范名的后缀
+        suffix = timelines[0].name.split(f".run{run_id}", 1)[1]
+        shutil.copy(timelines[0], out_dir / f"timeline_{tool}{suffix}")
+
+    # 其余几次的时间轴 dump 删掉：巨型关卡单个 dump 就有上百 MB
+    for p in out_dir.glob(f"timeline_{tool}.run*"):
+        if p.name != timelines[0].name:
+            p.unlink()
+
     return run_id, read_kv(best)
 
 
 class Track:
-    """一个工具的输出：对齐到首击后的波形 + 时间轴 + 指标。"""
+    """一个工具的输出：对齐到首击后的波形 + 时间轴 + 指标。
+
+    巨型关卡下一个立体声 WAV 可到数百 MB，所以：mono 取连续副本、统计完立刻放掉
+    原始多声道数组；能量前缀和只算一次，供多处指标复用。
+    """
 
     def __init__(self, name, wav_path, timeline_path, hit_len_frames):
         self.name = name
-        self.wav, self.sr = am.read_wav(wav_path)
+        wav, self.sr = am.read_wav(wav_path)
         self.timeline = am.read_timeline(timeline_path)
-        self.mono = self.wav[:, 0]
+        self.mono = np.ascontiguousarray(wav[:, 0])     # 连续副本，别持有整个立体声数组
+        self.n_channels = int(wav.shape[1])
         self.first_hit = float(self.timeline[0]) if self.timeline.size else 0.0
         self.first_frame = int(round(self.first_hit * self.sr))
         self.rel_times = self.timeline - self.first_hit
         self.rel_frames = self.mono.size - self.first_frame
-        self.summary = am.summarize(self.wav, self.sr, self.timeline, hit_len_frames)
+
+        self.prefix = am.loudness_prefix(self.mono) if self.mono.size else None
+        self.summary = am.summarize(wav, self.sr, self.timeline, hit_len_frames,
+                                    prefix=self.prefix)
+        del wav
         self.per_hit_density, _ = am.density_curve(self.timeline, hit_len_frames, self.sr,
                                                   self.mono.size)
 
@@ -113,12 +141,71 @@ def make_plot(out_dir, tracks, sparse_t, dense_t):
 
 
 # ── 主流程 ───────────────────────────────────────────────────────────────────
+def write_summary(out_root):
+    """跨关卡汇总：读每个子目录的 report.json，出一张总表（out/summary.md）。"""
+    rows = []
+    for d in sorted(p for p in out_root.iterdir() if p.is_dir()):
+        rj = d / "report.json"
+        if not rj.exists():
+            continue
+        r = json.loads(rj.read_text(encoding="utf-8"))
+        m, au, tl, loud = r["metrics"], r["audio"], r["timeline_diff"], r["loudness"]
+
+        def g(dct, key, default=None):
+            v = dct.get(key, default)
+            return v if v is not None else default
+
+        rows.append({
+            "level": d.name,
+            "tiles": int(m["adocao"].get("tiles") or 0),
+            "hits": int(m["adocao"].get("hits") or 0),
+            "adocao_ms": g(m["adocao"], "total_ms"),
+            "ref_ms": g(m["ref"], "total_ms"),
+            "adocao_mb": (g(m["adocao"], "peak_rss_kb", 0) or 0) / 1024.0,
+            "ref_mb": (g(m["ref"], "peak_rss_kb", 0) or 0) / 1024.0,
+            "max_dist_ms": g(tl, "ref_max_dist_ms"),
+            "extra_hits": g(tl, "adocao_extra_hits"),
+            "ref_hits": g(tl, "hits_ref"),
+            "clipped_pct": g(au["adocao"], "clipped_pct", 0.0),
+            "adocao_dyn": g(loud, "adocao_env_range_db"),
+            "ref_dyn": g(loud, "ref_env_range_db"),
+            "adocao_dur": g(au["adocao"], "duration_s", 0.0),
+        })
+
+    def fmt(v, nd=1, suffix=""):
+        return "—" if v is None else f"{v:,.{nd}f}{suffix}"
+
+    lines = [
+        "# 跨关卡汇总",
+        "",
+        "| 关卡 | tiles | hits (ref) | ADOCO 总耗时 | ref 总耗时 | 倍数 | ADOCO 峰值内存 | ref 峰值内存 | 时间轴最大偏差 | 多出的 hit | ADOCO 削波 | 包络动态范围 (ADOCO / ref) |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for r in rows:
+        ratio = f"{r['adocao_ms'] / r['ref_ms']:.2f}x" if r["adocao_ms"] and r["ref_ms"] else "—"
+        lines.append(
+            f"| `{r['level']}` | {r['tiles']:,} | {r['ref_hits']:,} | {fmt(r['adocao_ms'], 0, ' ms')} "
+            f"| {fmt(r['ref_ms'], 0, ' ms')} | {ratio} | {fmt(r['adocao_mb'], 1, ' MB')} "
+            f"| {fmt(r['ref_mb'], 1, ' MB')} | {fmt(r['max_dist_ms'], 4, ' ms')} "
+            f"| {r['extra_hits']:,} | {fmt(r['clipped_pct'], 3, ' %')} "
+            f"| {fmt(r['adocao_dyn'], 2)} / {fmt(r['ref_dyn'], 2)} dB |")
+    md = "\n".join(lines) + "\n"
+    (out_root / "summary.md").write_text(md, encoding="utf-8")
+    print(md)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", required=True, type=pathlib.Path)
+    ap.add_argument("--out", type=pathlib.Path, help="单个关卡的输出目录（生成报告）")
+    ap.add_argument("--summary", type=pathlib.Path, help="跨关卡汇总：读各子目录的 report.json")
     ap.add_argument("--label", default="local")
     ap.add_argument("--level-name", default="level")
     args = ap.parse_args()
+    if args.summary:
+        write_summary(args.summary)
+        return
+    if not args.out:
+        ap.error("需要 --out（或 --summary）")
     out = args.out
 
     provenance = (out / "PROVENANCE.txt").read_text(encoding="utf-8", errors="replace") \
@@ -126,14 +213,17 @@ def main():
     env = (out / "env.txt").read_text(encoding="utf-8", errors="replace") \
         if (out / "env.txt").exists() else ""
 
-    hit_wav, _ = am.read_wav(out / "assets" / "hit.wav")
-    hit_frames, hit_sr = hit_wav.shape[0], am.read_wav(out / "assets" / "hit.wav")[1]
+    hit_wav, hit_sr = am.read_wav(out / "assets" / "hit.wav")
+    hit_frames = hit_wav.shape[0]
 
     metrics, run_ids, tracks = {}, {}, {}
     for tool in TOOLS:
         run_id, kv = pick_fastest(out, tool)
         metrics[tool], run_ids[tool] = kv, run_id
-        tracks[tool] = Track(tool, out / f"{tool}.wav", out / f"timeline_{tool}.txt", hit_frames)
+        tl = next(p for p in (out / f"timeline_{tool}.f64", out / f"timeline_{tool}.f64.gz",
+                              out / f"timeline_{tool}.txt", out / f"timeline_{tool}.txt.gz")
+                  if p.exists())
+        tracks[tool] = Track(tool, out / f"{tool}.wav", tl, hit_frames)
     a, b = tracks["adocao"], tracks["ref"]
     n_runs = len(list(out.glob("metrics_adocao.run*.txt")))
 
@@ -183,8 +273,10 @@ def main():
         dense = d >= max(2, int(np.percentile(d, 99))) if d.size else None
         loud[f"{tool}_solo_hits"] = int(np.count_nonzero(solo))
         loud[f"{tool}_dense_threshold"] = int(d[dense].min()) if dense is not None and dense.any() else None
-        loud[f"{tool}_solo_db"] = round(am.median_rms_db(tr.mono, tr.sr, tr.timeline, solo), 2) if solo.any() else None
-        loud[f"{tool}_dense_db"] = round(am.median_rms_db(tr.mono, tr.sr, tr.timeline, dense), 2) \
+        loud[f"{tool}_solo_db"] = round(am.median_rms_db(tr.mono, tr.sr, tr.timeline, solo,
+                                                         prefix=tr.prefix), 2) if solo.any() else None
+        loud[f"{tool}_dense_db"] = round(am.median_rms_db(tr.mono, tr.sr, tr.timeline, dense,
+                                                          prefix=tr.prefix), 2) \
             if dense is not None and dense.any() else None
         s, dd = loud[f"{tool}_solo_db"], loud[f"{tool}_dense_db"]
         loud[f"{tool}_dynamic_db"] = round(dd - s, 2) if s is not None and dd is not None else None
@@ -198,11 +290,11 @@ def main():
             loud[f"{tool}_env_range_db"] = round(float(p95 - p5), 2)
 
     # ── A/B 试听（L=adocao，R=ref，同一段区间）──
+    # 稀疏段取「全曲最安静的 10 s」（包络上向量化求解），密集段取最密那一击附近。
     common_rel = min(a.rel_frames, b.rel_frames) / a.sr
     dense_t = max(0.0, float(a.rel_times[int(np.argmax(dens))]) - 0.2) if dens.size else 0.0
-    sparse_t = am.longest_low_density_window(a.rel_times, dens, 0.0, common_rel, 2, SPARSE_SEC)
-    if sparse_t is None:
-        sparse_t = 0.0
+    sparse_t = min(am.quietest_window_start(a.mono[a.first_frame:], a.sr, SPARSE_SEC),
+                   max(0.0, common_rel - SPARSE_SEC))
     for tag, t0, dur in (("sparse", sparse_t, SPARSE_SEC), ("dense", dense_t, DENSE_SEC)):
         dur = min(dur, max(0.5, common_rel - t0))
         left, right = a.window(t0, dur), b.window(t0, dur)
@@ -328,9 +420,8 @@ def main():
 - `adocao.wav` / `ref.wav`：两侧原始输出（未剪辑）
 - `ab_sparse.wav` / `ab_dense.wav`：A/B 试听片段（增益对齐）
 - `ab_*_raw.wav`：A/B 片段的原始电平版
-- `compare.png`：全曲响度包络 + 稀疏段 / 最密段波形
-- `report.json`：以上全部数字
-- `metrics_*.txt` / `timeline_*.txt` / `log_*.txt`：每次运行的原始数据
+- `timeline_*.f64.gz`：hit 时间轴（二进制 float64，巨型关卡下比文本省一个量级）
+- `metrics_*.txt` / `log_*.txt`：每次运行的原始指标与日志（每次运行都留）
 
 ## 6. 溯源与运行环境
 

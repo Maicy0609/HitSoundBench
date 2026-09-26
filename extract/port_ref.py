@@ -102,12 +102,15 @@ def main() -> None:
     anchor = ("        pins.push_back((int64_t)(offset * (double)sr));\n"
               "        vols.push_back((float)(tiles[i].volume / 100.0));\n"
               "    }\n")
-    core = sub_once(core, anchor, anchor + "\n" + """    // ── 基准附加：导出保留的 hit 时间（秒），供两侧时间轴对齐比较 ──
+    core = sub_once(core, anchor, anchor + "\n" + """    // ── 基准附加：导出保留的 hit 时间（二进制 float64，单位秒）──
+    // 巨型关卡下文本格式会让 Python 侧爆内存，故用二进制；写一次 fwrite。
     if (!dump_path.empty()) {
-        FILE* dp = fopen(dump_path.c_str(), "w");
+        std::vector<double> sec(pins.size());
+        for (size_t i = 0; i < pins.size(); ++i)
+            sec[i] = (double)pins[i] / (double)sr;
+        FILE* dp = fopen(dump_path.c_str(), "wb");
         if (dp) {
-            for (size_t i = 0; i < pins.size(); ++i)
-                fprintf(dp, "%.6f\\n", (double)pins[i] / (double)sr);
+            if (!sec.empty()) fwrite(sec.data(), sizeof(double), sec.size(), dp);
             fclose(dp);
         }
     }

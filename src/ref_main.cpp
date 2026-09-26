@@ -12,7 +12,7 @@
 int main(int argc, char** argv) {
     if (argc < 6) {
         std::fprintf(stderr,
-                     "usage: ref_gen <level.adofai> <hit.wav> <out.wav> <metrics.txt> <timeline.txt>\n");
+                     "usage: ref_gen <level.adofai> <hit.wav> <out.wav> <metrics.txt> <timeline.f64>\n");
         return 2;
     }
     const std::string levelPath = argv[1], hitWav = argv[2];

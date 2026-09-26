@@ -4,6 +4,8 @@
 唯一职责：把 WAV/时间轴变成数字，不负责排版和画图（那是 analyze.py 的事）。
 只用 numpy + 标准库 wave，不引入额外音频依赖。
 """
+import gzip
+import pathlib
 import wave
 
 import numpy as np
@@ -34,7 +36,26 @@ def write_wav(path, sr, data):
 
 
 def read_timeline(path):
-    return np.atleast_1d(np.loadtxt(str(path), dtype=np.float64))
+    """读 hit 时间轴（秒）。
+
+    巨型关卡（几千万 hit）下文本格式会让 Python 侧爆内存 + 慢一个量级，
+    因此基准工具导出的是**二进制 float64**（.f64，可 gzip）。为兼容旧产物仍保留 .txt 解析。
+    """
+    path = str(path)
+    if path.endswith(".f64") or path.endswith(".f64.gz"):
+        if path.endswith(".gz"):
+            with gzip.open(path, "rb") as f:
+                buf = f.read()
+        else:
+            buf = pathlib.Path(path).read_bytes()
+        return np.frombuffer(buf, dtype="<f8").astype(np.float64)
+
+    if path.endswith(".gz"):
+        with gzip.open(path, "rt") as f:
+            data = f.read()
+    else:
+        data = pathlib.Path(path).read_text()
+    return np.array(data.split(), dtype=np.float64) if data.strip() else np.zeros(0)
 
 
 # ── 采样级指标 ───────────────────────────────────────────────────────────────
@@ -67,15 +88,17 @@ def envelope_db(x, sr, win_ms=50):
 
 # ── 同时发声密度 ─────────────────────────────────────────────────────────────
 def density_curve(hit_times, hit_len_frames, sr, n_samples):
-    """返回 (每个 hit 起始处的同时发声数, 整段的最大同时发声数)。"""
+    """返回 (每个 hit 起始处的同时发声数, 整段的最大同时发声数)。
+
+    用两次 bincount 做差分，而不是 np.add.at —— 后者在千万级 hit 上慢一到两个数量级。
+    """
     if hit_times.size == 0:
         return np.zeros(0, dtype=np.int32), 0
     starts = np.rint(hit_times * sr).astype(np.int64)
     np.clip(starts, 0, n_samples - 1, out=starts)
     ends = np.minimum(starts + hit_len_frames, n_samples)
-    diff = np.zeros(n_samples + 1, dtype=np.int32)
-    np.add.at(diff, starts, 1)
-    np.add.at(diff, ends, -1)
+    diff = np.bincount(starts, minlength=n_samples + 1).astype(np.int64)
+    diff -= np.bincount(ends, minlength=n_samples + 1)
     dens = np.cumsum(diff)[:-1]
     return dens[starts], int(dens.max()) if dens.size else 0
 
@@ -86,26 +109,34 @@ def window_rms_db(x, sr, center_s, half_ms=25):
     return rms_db(x[a:b])
 
 
-def median_rms_db(x, sr, hit_times, mask, half_ms=25):
+def loudness_prefix(x):
+    """能量前缀和（积分图），供 median_rms_db 复用——千万级样本上重复算前缀和既慢又费内存。"""
+    return np.concatenate(([0.0], np.cumsum(np.square(x, dtype=np.float64))))
+
+
+def median_rms_db(x, sr, hit_times, mask, half_ms=25, prefix=None):
     """命中起始处 ±half_ms 窗口 RMS 的中位数（dBFS）。
 
-    用前缀平方和做积分图，一次向量化算完 15 万个窗口（逐窗口切片太慢）。
+    用能量前缀和一次向量化算完所有窗口（逐窗口切片会慢到不可用）。
     """
     if mask is None or not np.any(mask):
         return float("nan")
-    cs = np.concatenate(([0.0], np.cumsum(x.astype(np.float64) ** 2)))
+    if prefix is None:
+        prefix = loudness_prefix(x)
     half = max(1, int(half_ms / 1000.0 * sr))
     centers = np.rint(hit_times[mask] * sr).astype(np.int64)
     lo = np.clip(centers - half, 0, x.size - 1)
     hi = np.clip(centers + half + 1, 1, x.size)
-    mean_square = (cs[hi] - cs[lo]) / np.maximum(hi - lo, 1)
+    mean_square = (prefix[hi] - prefix[lo]) / np.maximum(hi - lo, 1)
     return float(np.median(10.0 * np.log10(np.maximum(mean_square, 1e-24) / (FULL_SCALE ** 2))))
 
 
 # ── 报告里用到的汇总 ─────────────────────────────────────────────────────────
-def summarize(x, sr, hit_times, hit_len_frames):
+def summarize(x, sr, hit_times, hit_len_frames, prefix=None):
     """x: [frames, channels] int16（多声道时以第 0 声道为准做统计）。"""
     mono = x[:, 0]
+    if prefix is None and x.shape[0]:
+        prefix = loudness_prefix(mono)
     last_end = int(round(hit_times[-1] * sr)) + hit_len_frames if hit_times.size else 0
     per_hit_density, max_density = density_curve(hit_times, hit_len_frames, sr, mono.size)
     solo = per_hit_density == 1
@@ -128,8 +159,8 @@ def summarize(x, sr, hit_times, hit_len_frames):
         "hit_len_frames": int(hit_len_frames),
         "max_density": max_density,
         "solo_hits": int(np.count_nonzero(solo)) if per_hit_density.size else 0,
-        "solo_rms_db": round(median_rms_db(mono, sr, hit_times, solo), 2) if per_hit_density.size else None,
-        "dense_rms_db": round(median_rms_db(mono, sr, hit_times, dense), 2) if per_hit_density.size else None,
+        "solo_rms_db": round(median_rms_db(mono, sr, hit_times, solo, prefix=prefix), 2) if per_hit_density.size else None,
+        "dense_rms_db": round(median_rms_db(mono, sr, hit_times, dense, prefix=prefix), 2) if per_hit_density.size else None,
     }
 
 
@@ -152,17 +183,19 @@ def normalize_rms(x, target_db=-20.0):
     return np.clip(x.astype(np.float64) * gain, -FULL_SCALE, CLIP_LEVEL).astype("<i2")
 
 
-def longest_low_density_window(hit_times, per_hit_density, start_s, end_s, max_density, min_len_s):
-    """在 [start_s, end_s) 里找一段长度 ≥ min_len_s、同时发声数 ≤ max_density 的区间。"""
-    if hit_times.size == 0:
-        return None
-    sel = (hit_times >= start_s) & (hit_times < end_s - min_len_s)
-    idx = np.flatnonzero(sel & (per_hit_density <= max_density))
-    for i in idx:
-        t0 = hit_times[i]
-        nxt = hit_times[(hit_times >= t0) & (hit_times < t0 + min_len_s)]
-        pos = np.searchsorted(hit_times, t0)
-        window = per_hit_density[pos : pos + nxt.size] if nxt.size else np.zeros(0)
-        if window.size and int(window.max()) <= max_density and t0 + min_len_s <= end_s:
-            return float(t0)
-    return None
+def quietest_window_start(x, sr, win_s, win_ms=100):
+    """在整轨里找「最安静的一段」（A/B 试听用的稀疏段）。
+
+    做法：先算 100 ms 包络（向量化），再用前缀和求每个 win_s 窗口的平均能量，
+    取最小者的起点。全程 O(网格) —— 千万级 hit 上也不能出现 Python 循环。
+    """
+    t, db = envelope_db(x, sr, win_ms)
+    if t.size == 0:
+        return 0.0
+    energy = np.power(10.0, db / 10.0)                 # dB → 线性能量
+    step = max(1, int(round(win_s / (win_ms / 1000.0))))
+    if step >= energy.size:
+        return 0.0
+    csum = np.concatenate(([0.0], np.cumsum(energy)))
+    means = (csum[step:] - csum[:-step]) / step        # 每个起点的窗口均值
+    return float(t[int(np.argmin(means))])

@@ -18,15 +18,22 @@
 namespace {
 
 // 导出 hit 时间（秒）供报告做时间轴对齐比较；分组顺序打散，故需排序。
+// 二进制 float64：巨型关卡（上千万 hit）下文本格式会让 Python 侧内存和耗时爆掉。
 void writeTimeline(const std::vector<HitsoundTimestampGroup>& groups, const std::string& path) {
     std::vector<double> all;
+    size_t total = 0;
+    for (const auto& g : groups) total += g.timestamps.size();
+    all.reserve(total);
     for (const auto& g : groups) all.insert(all.end(), g.timestamps.begin(), g.timestamps.end());
     std::sort(all.begin(), all.end());
 
-    FILE* f = std::fopen(path.c_str(), "w");
+    FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) return;
-    for (double t : all) std::fprintf(f, "%.6f\n", t);
+    if (!all.empty()) std::fwrite(all.data(), sizeof(double), all.size(), f);
     std::fclose(f);
+
+    std::printf("[probe] timeline_dump hits=%zu bytes=%zu\n", all.size(),
+                all.size() * sizeof(double));
 }
 
 }  // namespace
@@ -34,7 +41,7 @@ void writeTimeline(const std::vector<HitsoundTimestampGroup>& groups, const std:
 int main(int argc, char** argv) {
     if (argc < 6) {
         std::fprintf(stderr,
-                     "usage: adocao_gen <level.adofai> <assetsDir> <out.wav> <metrics.txt> <timeline.txt>\n");
+                     "usage: adocao_gen <level.adofai> <assetsDir> <out.wav> <metrics.txt> <timeline.f64>\n");
         return 2;
     }
     const std::string levelPath = argv[1];
