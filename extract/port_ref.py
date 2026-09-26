@@ -42,9 +42,10 @@ PROLOGUE = """// ── 平台无关的头文件（由 port_ref.py 生成，替�
 
 #include "hitsound_core.hpp"
 
-// 上游在文件顶部定义、被 load_adofai 引用的全局开关：剥离时顶部整段被本文件替换，
-// 所以这里补一份（基准里保持默认 true，即与上游默认行为一致）。
+// 上游在文件顶部定义、被 load_adofai / generate 引用的全局开关：剥离时顶部整段被本文件替换，
+// 所以这里补一份（基准里保持上游默认值）。
 static bool g_apply_offset = true;
+static bool g_nyquist = true;
 
 """
 
