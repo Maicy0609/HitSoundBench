@@ -24,6 +24,13 @@ if(NOT rapidjson_POPULATED)
     FetchContent_Populate(rapidjson)
 endif()
 
+# miniz 的 CMakeLists 里写着 cmake_minimum_required(VERSION 3.0)，CMake 4.x 默认直接拒绝
+# （Windows runner 上的 CMake 是 4.4）。用它自己报错信息里给的逃生阀降到 3.5；
+# CMake 3.31 上没这个变量，设置了也无害。
+if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
+
 FetchContent_Declare(miniz
     GIT_REPOSITORY https://github.com/richgel999/miniz.git
     GIT_TAG 3.0.2
