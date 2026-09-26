@@ -70,6 +70,15 @@ target_include_directories(ref_gen PRIVATE
     ${rapidjson_SOURCE_DIR}/include)
 target_compile_features(ref_gen PRIVATE cxx_std_17)
 
+# ── 时间轴诊断：逐 tile 看参考实现算出的累计时间（回答「时长为什么不同」）──
+add_executable(offsets_diag
+    tools/offsets_diag.cpp
+    ${EXTRACT_DIR}/ref/hitsound_core.cpp)
+target_include_directories(offsets_diag PRIVATE
+    ${EXTRACT_DIR}/ref
+    ${rapidjson_SOURCE_DIR}/include)
+target_compile_features(offsets_diag PRIVATE cxx_std_17)
+
 if(MSVC)
     target_compile_definitions(adocao_gen PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
     target_compile_definitions(ref_gen    PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)

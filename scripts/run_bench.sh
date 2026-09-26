@@ -110,6 +110,10 @@ for name in ${LEVELS//,/ }; do
     step "⑤ 关卡 $name：分析（挑最快一次 → 对齐时间轴 → 响度/音频指标 → 图表 / A-B 片段）"
     "$PY" "$ROOT/tools/analyze.py" --out "$OUT/$name" --label "${LABEL:-$(uname -s -m)}" \
         --level-name "$name"
+
+    step "⑤b 关卡 $name：逐 tile 时间轴诊断（解释两侧时长/时间轴差异）"
+    "$(exe offsets_diag)" "$LEVEL" > "$OUT/$name/offsets_diag.txt" 2>&1 || true
+    head -12 "$OUT/$name/offsets_diag.txt"
 done
 
 step "⑥ 跨关卡汇总"
