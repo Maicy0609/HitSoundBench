@@ -1,0 +1,5 @@
+=== ADOCAO Log started at 2026.09.26 19:16:21.129 ===
+[ 2026.09.26 19:16:21.133 | DEBUG ] TrackVis Phase5: 0/8 tiles have disappearTime, curDA=None curBB=4.0 curBA=3.0 refBPM=180.0
+[ 2026.09.26 19:16:21.133 | DEBUG ] Timeline: 7 tiles, total duration 3.50s, bpm range 120-180
+[ 2026.09.26 19:16:21.139 | DEBUG ] Hitsound: Synthesized 7 hits from 1 groups into 13.0s buffer
+[ 2026.09.26 19:16:21.147 | DEBUG ] Hitsound: Exported 683101 frames to /tmp/tt/a.wav

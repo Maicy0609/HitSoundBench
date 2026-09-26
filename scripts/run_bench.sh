@@ -96,7 +96,7 @@ for name in ${LEVELS//,/ }; do
         printf '\n── %s 第 %d/%d 次：ADOCO ──\n' "$name" "$i" "$RUNS"
         ( cd "$OUT/$name" && "$ADOCAO_EXE" "$LEVEL" "$OUT/$name/assets" \
             "$OUT/$name/adocao.run$i.wav" "$OUT/$name/metrics_adocao.run$i.txt" \
-            "$OUT/$name/timeline_adocao.run$i.f64" ) 2>&1 | tee "$OUT/$name/log_adocao.run$i.txt"
+            "$OUT/$name/timeline_adocao.run$i.f64" Kick ) 2>&1 | tee "$OUT/$name/log_adocao.run$i.txt"
 
         printf '\n── %s 第 %d/%d 次：ADOFAI_HitSound ──\n' "$name" "$i" "$RUNS"
         ( cd "$OUT/$name" && "$REF_EXE" "$LEVEL" "$HIT_WAV" \

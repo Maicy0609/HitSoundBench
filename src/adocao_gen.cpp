@@ -41,7 +41,8 @@ void writeTimeline(const std::vector<HitsoundTimestampGroup>& groups, const std:
 int main(int argc, char** argv) {
     if (argc < 6) {
         std::fprintf(stderr,
-                     "usage: adocao_gen <level.adofai> <assetsDir> <out.wav> <metrics.txt> <timeline.f64>\n");
+                     "usage: adocao_gen <level.adofai> <assetsDir> <out.wav> <metrics.txt> <timeline.f64>"
+                     " [forceHitsoundType]\n");
         return 2;
     }
     const std::string levelPath = argv[1];
@@ -50,6 +51,10 @@ int main(int argc, char** argv) {
     std::string assetsDir = argv[2];
     if (!assetsDir.empty() && assetsDir.back() != '/' && assetsDir.back() != '\\') assetsDir += '/';
     const std::string outWav = argv[3], metricsPath = argv[4], timelinePath = argv[5];
+    // 可选：强制所有 tile 用同一类型。基准里两侧都必须吃同一份 hit.wav，
+    // 而谱面写的 hitsound 可能是 "None" 或任意类型，所以这里统一成 Kick
+    // （等价于上游 CLI 的 --force-hitsound）。
+    const std::string forceType = (argc > 6) ? argv[6] : "";
 
     Probe probe;
     Logger::instance().init("adocao_gen.log", /*debugConsole=*/true);
@@ -63,6 +68,7 @@ int main(int argc, char** argv) {
     }
 
     Timeline timeline;
+    if (!forceType.empty()) timeline.setForceHitsoundType(forceType);
     probe.time("timeline", [&] { timeline.build(level, /*exportOnly=*/true); });
 
     HitsoundManager hitsounds;

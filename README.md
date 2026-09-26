@@ -77,8 +77,9 @@ ADOCAO_SRC=/path/to/ADOCAO HITSOUND_SRC=/path/to/ADOFAI_HitSound \
 | 差异 | 原因 |
 |---|---|
 | 首击偏移：ADOCO 0 s，ref 0.6 s | ADOCO 的缓冲以「下标 0 = 第一次击打」对齐（前导静音交给播放器 pre-roll）；ref 直接输出含前导静音的整轨 |
+| `level.zip` 那关 `hitsound` 是 `None` | 两侧仍用同一个 `hit.wav`：ADOCO 侧用上游自己的 `Timeline::setForceHitsoundType("Kick")`（等价于 CLI 的 `--force-hitsound`），ref 侧本来就只有一个样本 |
 | 命中数：ADOCO 比 ref 多 4,988 个 | ref 的奈奎斯特过滤丢弃间隔 < 1/(sr/2) ≈ 41.7 µs 的重复 hit（Tempest 上正好 4,988 个，两边自报一致） |
-| 整体增益差约 25 dB | ADOCO 逐样本硬削波顶到满量程；ref 按 1/√879 预缩放并把峰值留在 −14 dBFS（它另有可选的 EBU R128 后处理来补响度） |
+| 整体增益差 | 两部分原因：(1) ADOCO 逐样本硬削波会顶到满量程，ref 按 1/√N 预缩放并把峰值留在 −14 dBFS；(2) 参考实现读的是 `settings["volume"]`（音乐音量）并强制 `max(v,100)`，而 ADOCO 正确读 `settings["hitsoundVolume"]` —— `levels/level.zip` 那关写着 `hitsoundVolume: 50`，于是两边天然差约 6 dB。这是字段读错的已知缺陷，不是失真 |
 | 声道：2 vs 1 | ADOCO 输出立体声（L=R 复制），ref 输出单声道 |
 
 ## 实测结果（Actions run [36233904996](https://github.com/Maicy0609/HitSoundBench/actions/runs/36233904996)）
