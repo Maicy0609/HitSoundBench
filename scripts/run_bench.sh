@@ -116,8 +116,8 @@ for name in ${LEVELS//,/ }; do
         > "$OUT/$name/offsets_diag.txt" 2>&1 || true
     head -12 "$OUT/$name/offsets_diag.txt"
     if [ -s "$OUT/$name/offsets_ref.f64" ]; then
-        "$PY" "$ROOT/tools/tile_diff.py" "$OUT/$name/offsets_ref.f64" \
-              "$OUT/$name/timeline_adocao.f64.gz" > "$OUT/$name/tile_diff.txt" 2>&1 || true
+        ( cd "$OUT/$name" && "$PY" "$ROOT/tools/tile_diff.py" offsets_ref.f64 \
+              timeline_adocao.f64.gz > tile_diff.txt 2>&1 ) || true
         cat "$OUT/$name/tile_diff.txt"
         gzip -f "$OUT/$name/offsets_ref.f64"
     fi

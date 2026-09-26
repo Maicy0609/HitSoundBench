@@ -70,10 +70,23 @@ def main():
     nz = np.abs(delta) > 1e-6
     print(f"\n逐 tile 时长有差异的 tile 数 = {int(nz.sum()):,}（占 {100 * nz.sum() / n:.2f}%）")
     if nz.any():
+        bad = np.flatnonzero(nz)
         k = int(np.argmax(np.abs(delta)))
+        print(f"序号范围            = {bad.min():,} .. {bad.max():,}"
+              f"（连续: {bad.max() - bad.min() + 1 == bad.size}）")
         print(f"单 tile 时长差最大处：tile {k:,}（参考时间 {ref[k]:.4f} s），差 {delta[k] * 1e3:+.4f} ms")
         print(f"这些 tile 的累计贡献：正 {delta[delta > 0].sum():+.4f} s / "
               f"负 {delta[delta < 0].sum():+.4f} s")
+        # 供进一步核对原始 angleData 用（列表写进产物）
+        print("\n差异最大的 20 个 tile（序号 / 参考时间 / 时长差 ms）：")
+        for i in np.argsort(-np.abs(delta))[:20]:
+            print(f"   tile {int(i):>10,}   @ {ref[i]:9.4f} s   Δ={delta[i] * 1e3:+9.4f} ms")
+        lines = [f"first_differing_tile={int(bad.min())}", f"last_differing_tile={int(bad.max())}",
+                 f"count={int(bad.size)}", f"total_delta_s={float(delta.sum()):+.6f}", ""]
+        for i in np.argsort(-np.abs(delta))[:200]:
+            lines.append(f"{int(i)}\t{ref[i]:.6f}\t{delta[i]:+.9f}")
+        pathlib.Path("tile_diff_indices.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print("（差异最大的 200 个 tile 已写入 tile_diff_indices.txt）")
 
 
 if __name__ == "__main__":

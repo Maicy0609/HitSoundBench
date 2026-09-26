@@ -103,6 +103,7 @@ jobs:
             out/*/compare.png
             out/*/offsets_diag.txt
             out/*/tile_diff.txt
+            out/*/tile_diff_indices.txt
             out/*/metrics_*.txt
             out/*/timeline_*.f64.gz
             out/*/log_*.txt
