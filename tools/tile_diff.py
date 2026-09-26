@@ -41,6 +41,8 @@ def main():
         print(f"注意：长度不同（参考实现 {ref.size:,} 个 tile / ADOCO {ado.size:,} 个 hit），"
               f"只比较前 {n:,} 个")
     ref, ado = ref[:n], ado[:n]
+    # ADOCO 的时间轴以「首击 = 0」为基准，参考实现是绝对时间，所以再减掉首击偏移。
+    ref = ref - ref[0]
 
     diff = ado - ref                                    # >0 表示 ADOCO 更晚
     delta = np.diff(diff, prepend=0.0)                  # 每个 tile 的时长差
