@@ -1,0 +1,78 @@
+name: buildcheck-hitsound
+
+# 手动触发：把 ADOFAI_HitSound 的某个分支拉到 windows-latest，
+# 用原生 MSVC (cl.exe) 编译并跑一遍冒烟（含一键响度归一化），
+# 用来验证「沙箱里没有 MSVC」时无法本地确认的 Windows 侧改动。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'ADOFAI_HitSound 的分支/提交'
+        default: 'portable-gcc'
+        required: true
+
+concurrency:
+  group: buildcheck-hitsound
+  cancel-in-progress: false
+
+jobs:
+  msvc:
+    name: MSVC 编译 + 冒烟
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: 取被测分支
+        shell: bash
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          git clone --depth 1 --branch "${{ inputs.ref }}" \
+            https://github.com/Maicy0609/ADOFAI_HitSound.git src
+          cd src && git log --oneline -1
+
+      - name: cl.exe 编译（C++ + 第三方 C 文件）
+        shell: cmd
+        run: |
+          cd src
+          cl /nologo /std:c++17 /O2 /EHsc /W3 HitSound.cpp ^
+             third_party\ffmpeg\ebur128\ebur128.c /D_USE_MATH_DEFINES /Fe:HitSound.exe
+          dir HitSound.exe
+
+      - name: 冒烟：生成 + 一键响度归一化
+        shell: bash
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          cd src
+          python - <<'PY'
+          import json
+          json.dump({
+              "settings": {"version": 15, "song": "smoke", "bpm": 120.0, "offset": 0.0,
+                           "hitsound": "Kick", "hitsoundVolume": 100.0, "zoom": 100.0},
+              "angleData": [0, 90, 180, 270, 0, 90, 180, 45, 315, 200, 60],
+              "actions": [{"floor": 3, "eventType": "Twirl"},
+                          {"floor": 5, "eventType": "SetSpeed", "speedType": "Multiplier",
+                           "bpmMultiplier": 1.5}],
+              "decorations": []
+          }, open("smoke.adofai", "w"))
+          PY
+          printf 'smoke.adofai\ny\n-23\n' | ./HitSound.exe
+          ls -la smoke*.wav
+
+      - name: 校验产物（WAV 头合法 + 响度到目标）
+        shell: bash
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          cd src
+          python - <<'PY'
+          import wave
+          for f in ("smoke.wav", "smoke_norm.wav"):
+              w = wave.open(f)
+              print(f"{f}: {w.getnchannels()}ch {w.getframerate()}Hz {w.getnframes()} frames  OK")
+              w.close()
+          PY
+          ffmpeg -hide_banner -nostats -i smoke_norm.wav -af loudnorm=print_format=json -f null - 2>&1 \
+            | grep -E '"(input_i|input_tp)"'
