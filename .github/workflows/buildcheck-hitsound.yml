@@ -61,18 +61,35 @@ jobs:
           printf 'smoke.adofai\ny\n-23\n' | ./HitSound.exe
           ls -la smoke*.wav
 
-      - name: 校验产物（WAV 头合法 + 响度到目标）
+      - name: 校验产物（WAV 合法 + 增益自洽 + 不越峰值上限）
         shell: bash
         env:
           PYTHONUTF8: '1'
         run: |
           cd src
           python - <<'PY'
-          import wave
-          for f in ("smoke.wav", "smoke_norm.wav"):
-              w = wave.open(f)
-              print(f"{f}: {w.getnchannels()}ch {w.getframerate()}Hz {w.getnframes()} frames  OK")
+          import math, struct, wave
+
+          def stats(path):
+              w = wave.open(path)
+              assert w.getsampwidth() == 2 and w.getnchannels() == 1, path
+              n = w.getnframes()
+              d = w.readframes(n)
               w.close()
+              s = struct.unpack("<%dh" % (len(d) // 2), d)
+              rms = math.sqrt(sum(x * x for x in s) / len(s)) / 32767.0
+              return rms, max(abs(x) for x in s), n
+
+          r_raw, p_raw, n_raw = stats("smoke.wav")
+          r_norm, p_norm, n_norm = stats("smoke_norm.wav")
+          assert n_raw == n_norm, "归一化改变了帧数"
+          gain_db = 20 * math.log10(r_norm / r_raw)
+          ceiling = int(32767 * 10 ** (-2.0 / 20))          # -2 dBTP 上限对应的采样值
+          print(f"raw : RMS {20*math.log10(r_raw):6.2f} dBFS  peak {p_raw}")
+          print(f"norm: RMS {20*math.log10(r_norm):6.2f} dBFS  peak {p_norm}")
+          print(f"实测增益 {gain_db:.3f} dB（工具自报 4.524 dB）")
+          print(f"-2 dBTP 上限 = {ceiling}")
+          assert abs(gain_db - 4.524) < 0.05, "增益与工具自报不符"
+          assert p_norm <= ceiling, "越过峰值上限"
+          print("OK：两个 WAV 合法，增益自洽，未越峰值上限")
           PY
-          ffmpeg -hide_banner -nostats -i smoke_norm.wav -af loudnorm=print_format=json -f null - 2>&1 \
-            | grep -E '"(input_i|input_tp)"'
