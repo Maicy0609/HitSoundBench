@@ -112,8 +112,15 @@ for name in ${LEVELS//,/ }; do
         --level-name "$name"
 
     step "⑤b 关卡 $name：逐 tile 时间轴诊断（解释两侧时长/时间轴差异）"
-    "$(exe offsets_diag)" "$LEVEL" > "$OUT/$name/offsets_diag.txt" 2>&1 || true
+    "$(exe offsets_diag)" "$LEVEL" "$OUT/$name/offsets_ref.f64" \
+        > "$OUT/$name/offsets_diag.txt" 2>&1 || true
     head -12 "$OUT/$name/offsets_diag.txt"
+    if [ -s "$OUT/$name/offsets_ref.f64" ]; then
+        "$PY" "$ROOT/tools/tile_diff.py" "$OUT/$name/offsets_ref.f64" \
+              "$OUT/$name/timeline_adocao.f64.gz" > "$OUT/$name/tile_diff.txt" 2>&1 || true
+        cat "$OUT/$name/tile_diff.txt"
+        gzip -f "$OUT/$name/offsets_ref.f64"
+    fi
 done
 
 step "⑥ 跨关卡汇总"

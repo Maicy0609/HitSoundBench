@@ -102,6 +102,7 @@ jobs:
             out/*/report.json
             out/*/compare.png
             out/*/offsets_diag.txt
+            out/*/tile_diff.txt
             out/*/metrics_*.txt
             out/*/timeline_*.f64.gz
             out/*/log_*.txt

@@ -8,13 +8,25 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <string>
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: offsets_diag <level.adofai>\n");
+        std::fprintf(stderr, "usage: offsets_diag <level.adofai> [offsets_out.f64]\n");
         return 2;
     }
     const std::vector<Tile> t = load_adofai(argv[1]);
+
+    // 可选：把逐 tile 的累计时间写成二进制 float64，供 tile_diff.py 与 ADOCO 的
+    // hit 时间轴按 tile 序号对齐相减（回答「总长差在哪一段」）。
+    if (argc > 2 && !t.empty()) {
+        std::vector<double> off(t.size());
+        for (size_t i = 0; i < t.size(); ++i) off[i] = t[i].offset;
+        if (FILE* f = std::fopen(argv[2], "wb")) {
+            std::fwrite(off.data(), sizeof(double), off.size(), f);
+            std::fclose(f);
+        }
+    }
 
     size_t n_back = 0, n_zero = 0, first_back = 0;
     double max_offset = 0.0, sum_dt = 0.0;
