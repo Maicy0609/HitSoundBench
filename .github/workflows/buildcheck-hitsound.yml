@@ -8,7 +8,7 @@ on:
     inputs:
       ref:
         description: 'ADOFAI_HitSound 的分支/提交'
-        default: 'portable-gcc'
+        default: 'main'
         required: true
 
 concurrency:
@@ -37,7 +37,7 @@ jobs:
         run: |
           cd src
           cl /nologo /std:c++17 /O2 /EHsc /W3 HitSound.cpp ^
-             third_party\ffmpeg\ebur128\ebur128.c /D_USE_MATH_DEFINES /Fe:HitSound.exe
+             third_party\ebur128\ebur128.c /Ithird_party\ebur128 /D_USE_MATH_DEFINES /Fe:HitSound.exe
           dir HitSound.exe
 
       - name: 冒烟：生成 + 一键响度归一化
