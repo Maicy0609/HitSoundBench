@@ -42,6 +42,10 @@ PROLOGUE = """// ── 平台无关的头文件（由 port_ref.py 生成，替�
 
 #include "hitsound_core.hpp"
 
+// 上游在文件顶部定义、被 load_adofai 引用的全局开关：剥离时顶部整段被本文件替换，
+// 所以这里补一份（基准里保持默认 true，即与上游默认行为一致）。
+static bool g_apply_offset = true;
+
 """
 
 DECLS = """// ── 基准入口（附加声明，非上游内容）──────────────────────────────────────────
@@ -125,7 +129,9 @@ def main() -> None:
               "// 生成规则与改写清单见 extract/port_ref.py（算法原文，只做去 Windows 化 + 换入口）。\n")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "hitsound_core.hpp").write_text(
-        banner + "#pragma once\n#include <algorithm>   // Tile::update 用到 std::max\n#include <string>\n#include <vector>\n\n"
+        banner + "#pragma once\n#include <algorithm>   // Tile::update 用到 std::max\n"
+                 "#include <cmath>       // Tile::update 用到 fmod\n"
+                 "#include <string>\n#include <vector>\n\n"
         + struct_text + "\n" + DECLS, encoding="utf-8")
     (out_dir / "hitsound_core.cpp").write_text(
         banner + PROLOGUE + core, encoding="utf-8")
