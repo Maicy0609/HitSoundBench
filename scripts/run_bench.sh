@@ -11,6 +11,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNS="${RUNS:-3}"
 PY="${PY:-$(command -v python3 || command -v python)}"
+# Windows 上 Python 默认按 cp1252 编码 stdout，脚本里的中文会 UnicodeEncodeError
+export PYTHONUTF8="${PYTHONUTF8:-1}"
+export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
 BUILD="$ROOT/build"
 OUT="$ROOT/out"
 EX="$BUILD/extracted"
@@ -39,8 +42,8 @@ print("cpu            " + (platform.processor() or "unknown"))
 print("cores          " + str(multiprocessing.cpu_count()))
 PY
     cmake --version | head -1
-    { cc --version 2>/dev/null | head -1; } || true
-    { cl 2>&1 | head -1; } || true
+    cc --version 2>/dev/null | head -1 || true
+    command -v cl >/dev/null 2>&1 && cl 2>&1 | head -1 || true
 } | tee "$OUT/env.txt"
 
 step "③ 配置 / 构建（两侧同为 Release、O2，不开 -march=native）"
