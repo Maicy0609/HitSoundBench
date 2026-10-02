@@ -64,13 +64,24 @@ ADOCAO_SRC=/path/to/ADOCAO HITSOUND_SRC=/path/to/ADOFAI_HitSound \
 
 ## 测量口径
 
-- 两侧同为 `-O2`、同一台机器、同一次运行；**不开** `-march=native` / LTO / PGO（保持可比）。
+优化档由 `OPT` 决定（`project` = 默认）：
+
+| 档位 | ADOCAO | 参考实现 | 用途 |
+| --- | --- | --- | --- |
+| **`project`（默认）** | 它自己的 Release 档：`-O3 -march=native -fomit-frame-pointer`（`CMakeLists.txt:55`）；MSVC 侧用 `/O2 /Ob3 /arch:AVX2` 近似 | 它自己文档里的编译命令行：`cl /O2 /arch:AVX2`（GCC 侧对应 `-O2 -mavx2`） | **各自按作者的方式编译** —— 对外引用的口径 |
+| `uniform` | `-O2` | `-O2` | 排除优化差异后的对照 |
+
+> 早先版本不管两边设置、统一用 `-O2`（而且它压过了 CMake Release 自带的 `-O3`），等于把 ADOCAO
+> 的 Release 档降级 —— 这是 [issue #2](https://github.com/Maicy0609/HitSoundBench/issues/2) 指出的问题，
+> 现在默认档改成"各自项目自己的 Release 档"，`uniform` 只作为对照保留。
+
+- 两侧同一台机器、同一轮运行；`HITSOUNDBENCH_OPT` 记录在 `env.txt` 与报告里。
 - 阶段耗时由 `src/probe.hpp` 记录（`steady_clock`），峰值内存取进程峰值 RSS
   （Linux `/proc/self/status` 的 `VmHWM`，Windows `GetProcessMemoryInfo`）。
 - 两侧阶段划分不同，报告里逐行标注了口径（ADOCO 拆成 解析 / 角度传播+前缀和 / 混音 / 写盘；
   ADOFAI_HitSound 是 `load_adofai` + `generate` 两段）。不要跨行错位对比。
-- 时间轴一致性用**最近邻匹配**而不是逐下标比较：ref 会丢掉奈奎斯特过滤掉的重复 hit，
-  逐下标会因为集合不同而整体错位。
+- 时间轴一致性用**按 tile 序号对齐**的逐 tile 差（`tile_diff.txt`）为准；
+  「最近邻距离」在超密段落会失效（任何时间点都落在某个 hit 的几微秒内，测到的是网格密度）。
 
 ## 已知的、不是 bug 的差异
 

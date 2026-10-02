@@ -38,12 +38,40 @@ FetchContent_Declare(miniz
 FetchContent_MakeAvailable(miniz)
 target_include_directories(miniz PUBLIC ${miniz_SOURCE_DIR})
 
-# ── 编译选项：两侧同为 -O2，不开 -march=native / LTO（保持可比性）──
+# ── 编译优化档 ──────────────────────────────────────────────────────────────
+# project（默认）：**各自项目自己的 Release 档**，也就是「各自按作者的方式编译」：
+#     ADOCAO      : -O3 -march=native -fomit-frame-pointer（它的 CMakeLists.txt:55）
+#     参考实现    : 它自己文档里的 cl /O2 /arch:AVX2（GCC 侧对应 -O2 + AVX2）
+#                   MSVC 侧用 /O2 /Ob3 /arch:AVX2 近似 ADOCAO 的 -march=native
+# uniform：两侧都退到 -O2（不带 AVX2/native），只用来观察"排除优化差异后"的差距。
+#
+# 起因：issue #2 —— 早先版本给两侧统一 -O2，把 ADOCAO 的 Release 档降级了。
+set(HITSOUNDBENCH_OPT "project" CACHE STRING "编译优化档：project | uniform")
+
 if(MSVC)
-    add_compile_options(/O2 /EHsc /W3 /utf-8)
+    set(BENCH_WARN /EHsc /W3 /utf-8)
+    if(HITSOUNDBENCH_OPT STREQUAL "project")
+        set(ADOCAO_OPT /O2 /Ob3 /arch:AVX2)     # 近似 ADOCAO 的 -O3 -march=native
+        set(REF_OPT    /O2 /arch:AVX2)          # 参考实现文档里的编译命令行
+    else()
+        set(ADOCAO_OPT /O2)
+        set(REF_OPT    /O2)
+    endif()
 else()
-    add_compile_options(-O2)
+    set(BENCH_WARN -Wall)
+    if(HITSOUNDBENCH_OPT STREQUAL "project")
+        set(ADOCAO_OPT -O3 -march=native -fomit-frame-pointer)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+            set(REF_OPT -O2 -mavx2)             # 对应参考实现文档里的 /arch:AVX2
+        else()
+            set(REF_OPT -O2)
+        endif()
+    else()
+        set(ADOCAO_OPT -O2)
+        set(REF_OPT    -O2)
+    endif()
 endif()
+message(STATUS "优化档 = ${HITSOUNDBENCH_OPT}：adocao_gen[${ADOCAO_OPT}] ref_gen[${REF_OPT}]")
 
 # ── ADOCAO 侧：复用其 core（解析/时间轴）+ HitsoundManager（合成），C++20 ──
 add_executable(adocao_gen
@@ -60,6 +88,7 @@ target_include_directories(adocao_gen PRIVATE
     ${rapidjson_SOURCE_DIR}/include)
 target_link_libraries(adocao_gen PRIVATE miniz)
 target_compile_features(adocao_gen PRIVATE cxx_std_20)
+target_compile_options(adocao_gen PRIVATE ${BENCH_WARN} ${ADOCAO_OPT})
 
 # ── ADOFAI_HitSound 侧：剥离后的 HitSound.cpp，C++17（与上游一致）──
 add_executable(ref_gen
@@ -69,6 +98,7 @@ target_include_directories(ref_gen PRIVATE
     ${EXTRACT_DIR}/ref
     ${rapidjson_SOURCE_DIR}/include)
 target_compile_features(ref_gen PRIVATE cxx_std_17)
+target_compile_options(ref_gen PRIVATE ${BENCH_WARN} ${REF_OPT})
 
 # ── 时间轴诊断：逐 tile 看参考实现算出的累计时间（回答「时长为什么不同」）──
 add_executable(offsets_diag
@@ -78,6 +108,7 @@ target_include_directories(offsets_diag PRIVATE
     ${EXTRACT_DIR}/ref
     ${rapidjson_SOURCE_DIR}/include)
 target_compile_features(offsets_diag PRIVATE cxx_std_17)
+target_compile_options(offsets_diag PRIVATE ${BENCH_WARN} ${REF_OPT})
 
 if(MSVC)
     target_compile_definitions(adocao_gen PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)

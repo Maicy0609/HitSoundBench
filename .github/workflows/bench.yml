@@ -13,6 +13,10 @@ on:
         description: '关卡，逗号分隔：tempest（上游样例）、level（仓库里的 level.zip，运行时才解压）'
         default: 'tempest,level'
         required: false
+      opt:
+        description: '编译优化档：project=各自项目自己的 Release 档（ADOCO -O3 -march=native）；uniform=两侧都 -O2'
+        default: 'project'
+        required: false
       adocao_ref:
         description: 'ADOCAO 提交/分支（留空 = 默认分支）'
         default: ''
@@ -58,6 +62,7 @@ jobs:
           PYTHONIOENCODING: utf-8
           RUNS: ${{ inputs.runs || '2' }}
           LEVELS: ${{ inputs.levels || 'tempest,level' }}
+          OPT: ${{ inputs.opt || 'project' }}
           LABEL: ${{ matrix.os }}
           ADOCAO_REF: ${{ inputs.adocao_ref }}
           HITSOUND_REF: ${{ inputs.hitsound_ref }}

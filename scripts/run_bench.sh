@@ -15,6 +15,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNS="${RUNS:-3}"
 LEVELS="${LEVELS:-tempest,level}"
+OPT="${OPT:-project}"        # 编译优化档：project=各自项目自己的 Release 档；uniform=两侧都 -O2
 PY="${PY:-$(command -v python3 || command -v python)}"
 # Windows 上 Python 默认按 cp1252 编码 stdout，脚本里的中文会 UnicodeEncodeError
 export PYTHONUTF8="${PYTHONUTF8:-1}"
@@ -68,15 +69,16 @@ print("machine        " + platform.machine())
 print("cpu            " + (platform.processor() or "unknown"))
 print("cores          " + str(multiprocessing.cpu_count()))
 PY
+    echo "opt_mode       ${OPT}（project=各自项目 Release 档 / uniform=两侧都 -O2）"
     cmake --version | head -1
     cc --version 2>/dev/null | head -1 || true
     command -v cl >/dev/null 2>&1 && cl 2>&1 | head -1 || true
 } | tee "$OUT/env.txt"
 
-step "③ 配置 / 构建（两侧同为 Release、O2，不开 -march=native）"
+step "③ 配置 / 构建（优化档 = ${OPT}）"
 GEN=""
 command -v ninja >/dev/null 2>&1 && GEN="-G Ninja"
-cmake -S "$ROOT" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release $GEN
+cmake -S "$ROOT" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DHITSOUNDBENCH_OPT="$OPT" $GEN
 cmake --build "$BUILD" --parallel
 
 ADOCAO_EXE="$(exe adocao_gen)"
