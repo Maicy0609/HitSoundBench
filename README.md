@@ -93,53 +93,66 @@ ADOCAO_SRC=/path/to/ADOCAO HITSOUND_SRC=/path/to/ADOFAI_HitSound \
 | 整体增益差 | 两部分原因：(1) ADOCO 逐样本硬削波会顶到满量程，ref 按 1/√N 预缩放并把峰值留在 −14 dBFS；(2) 参考实现读的是 `settings["volume"]`（音乐音量）并强制 `max(v,100)`，而 ADOCO 正确读 `settings["hitsoundVolume"]` —— `levels/level.zip` 那关写着 `hitsoundVolume: 50`，于是两边天然差约 6 dB。这是字段读错的已知缺陷，不是失真 |
 | 声道：2 vs 1 | ADOCO 输出立体声（L=R 复制），ref 输出单声道 |
 
-## 实测结果（Actions run [36233904996](https://github.com/Maicy0609/HitSoundBench/actions/runs/36233904996)）
+## 实测结果
 
-上游：ADOCAO `fe7cc1b` / ADOFAI_HitSound `2ed7892`；谱面 Tempest；打击音两侧同为 `hit.wav`；
-两平台各自 3 次运行取最快（离散度 < 2%）。job 墙钟：ubuntu 67 s、windows 108 s。
+### 各自项目的 Release 档（`OPT=project`，默认）
 
-| 阶段 (ms) | ubuntu-latest (GCC 13) | | windows-latest (MSVC 19.51) | |
-|---|---:|---:|---:|---:|
-| | ADOCAO | ADOFAI_HitSound | ADOCAO | ADOFAI_HitSound |
-| 解析谱面 | 176.0 | 88.1 | 379.8 | 382.3 |
-| 角度/BPM 传播 + 前缀和 | 6.6 | 含在上一行 | 17.3 | 含在上一行 |
-| 合成 + 混音 | 3,147.1 | 524.0 | 4,287.0 | 907.6 |
-| 写 WAV | 12.8 | 含在上一行 | 35.0 | 含在上一行 |
-| **总计** | **3,366.7** | **612.1**（5.50×） | **4,782.7** | **1,289.9**（3.71×） |
-| 峰值内存 (RSS) | 172.8 MB | 163.0 MB | 155.7 MB | 146.5 MB |
+Actions run [37076183039](https://github.com/Maicy0609/HitSoundBench/actions/runs/37076183039)；
+上游 ADOCAO `fe7cc1b` / ADOFAI_HitSound `ec9e0d6`；两平台各 2 次取最快。
 
-音频指标（采样率/声道、时长、峰值、RMS、削波、密度）与时间轴指标在两个平台上**完全一致**，
-两侧输出 WAV 更是**逐字节相同**：
+| 关卡 | 平台 | ADOCAO 总计 | 参考实现总计 | 比值 | 单 hit 归一化（ADOCO / ref） |
+|---|---|---:|---:|---:|---:|
+| tempest（158k tiles） | ubuntu (GCC 13) | **564 ms** | 602 ms | **0.94×** | 3.56 / 3.92 µs = **0.91×** |
+| tempest | windows (MSVC 19.5) | 5,690 ms | 993 ms | 5.73× | — |
+| level（6.77M tiles） | ubuntu | 19,313 ms | 2,770 ms | 6.97× | 2.85 / 4.81 µs = **0.59×** |
+| level | windows (MSVC) | 184,648 ms | 6,102 ms | 30.26× | — |
 
-```
-adocao.wav  sha256 a5ea3e77beb2c9221bfd20417d387fd8da8f9cb41ce945b3e51632751f34d1f5  (linux == windows)
-ref.wav     sha256 c2d903ee5199e01cee8dfcee57238568bd891870739a06cea39d688abae23d4d  (linux == windows)
-```
+- ADOCAO 用**它自己的 Release 档**：`-O3 -march=native -fomit-frame-pointer`（`CMakeLists.txt:55`）；
+  参考实现用它自己文档里的 `cl /O2 /arch:AVX2`（GCC 侧 `-O2 -mavx2`）。
+- **Tempest 上 ADOCAO 反而略快（0.94×）**，按单 hit 也更快（0.91×）。
+- `level` 那关看着是 6.97×，但参考实现在这关**丢掉了 91.5% 的 hit**（奈奎斯特过滤：
+  只混 575,827 / 6,770,912）—— 按单 hit 归一化，ADOCO 快约 **1.7 倍**。
+- Windows 列用 MSVC 近似（`/O2 /Ob3 /arch:AVX2`）：MSVC 对这个逐样本 clamp 循环的向量化不如
+  GCC `-O3 -march=native`，而 **ADOCAO 自己的 Windows 发布档其实是 MinGW**（它的 CI 用 msys2 mingw64），
+  所以这一列对 ADOCAO 偏保守。
 
-也就是说两套实现都是确定性流水线，平台之间只差耗时。
+### 对照：两侧都 `-O2`（`OPT=uniform`）
 
-| 侧写 | ADOCAO | ADOFAI_HitSound |
+Actions run [37076203023](https://github.com/Maicy0609/HitSoundBench/actions/runs/37076203023)（另一轮机器）。
+
+| 关卡 | 平台 | ADOCAO | 参考实现 | 比值 |
+|---|---|---:|---:|---:|
+| tempest | ubuntu | 4,104 ms | 1,410 ms | 2.91× |
+| level | ubuntu | 162,081 ms | 6,497 ms | 24.95× |
+
+> 机器可能不同，跨轮只比"同轮内的比值"。早先版本**只**跑了这一档，于是对外结论是
+> "ADOCO 慢 5.5×" —— 那是把 ADOCAO 的 Release 档降到统一 `-O2` 造成的
+> （见 [issue #2](https://github.com/Maicy0609/HitSoundBench/issues/2)，已修正并致谢）。
+
+### 一致性与侧写（`OPT=project`）
+
+- 音频指标与时间轴指标在两平台上**完全一致**（同一次改动下 Linux == Windows）。
+- 时间轴：Tempest 逐 tile 差 ≤ 0.0003 ms；`level` 在参考实现那两个 bug 修好之后也是
+  **逐 tile 最大 0.0208 ms（≈1 采样）** —— 修复前是 220 ms 且总长差 11.935 s（见下文）。
+
+| 侧写（Tempest） | ADOCAO | ADOFAI_HitSound |
 |---|---|---|
-| 时间轴 | 158,402 hits，逐击一致 | 153,414 hits（过滤掉 4,988 个重复），与 ADOCO 轴最大最近邻距离 0.021 ms = 1 采样 |
-| 输出 | 149.186 s / 立体声（L=R） / 峰值 32,767 / RMS −7.06 dBFS | 138.786 s / 单声道 / 峰值 6,189 / RMS −29.83 dBFS |
-| 削波 | 23,883 样本（0.334%）顶到满量程 | 0 |
-| 包络动态范围 (P95−P5) | 5.96 dB | 12.25 dB |
+| 输出 | 149.19 s / 立体声（L=R） | 138.79 s / 单声道 |
+| 峰值 / RMS | 32,767 / −7.06 dBFS | 6,189 / −29.83 dBFS |
+| 削波 | 23,883 样本（0.334%） | 0 |
+| 包络动态范围 P95−P5 | 5.96 dB | 12.25 dB |
 | 最大同时发声数 | 973（含重复击打） | 879（过滤后） |
-| 首击偏移 / 尾部静音 | 0 s / 11.0 s | 0.6 s（前导）/ 0 s |
 
 ### 结论
 
-- **时间轴算法等价**：唯一的差别是 ref 的奈奎斯特过滤（丢弃间隔 < 41.7 µs 的重复 hit），
-  其余逐击相同 —— 4,988 = 158,402 − 153,414，与 ref 自报的被过滤数完全相等。
-- **性能**：ADOCO 慢 3.7×（MSVC）/ 5.5×（GCC）。原因在混音循环：ADOCO 每个样本做两次
-  `clamp` 且写两声道、也没有先算密度；ref 每样本一次 `double` 累加，且用差分数组先求最大同时发声数。
-- **音频**：ADOCO 是逐样本硬削波（密集段 0.334% 样本饱和，动态范围被压到 5.96 dB）；
-  ref 是静态等功率预缩放 + 常数增益（0 削波、动态范围 12.25 dB），整体电平低约 23 dB
-  —— 它另有可选的 EBU R128 后处理来补响度，因此**直接对放两个 `*.wav` 只能听出音量差**，
-  要比音色请用增益对齐的 `ab_*.wav`。
-
-> 本地沙箱（6 核容器）跑同一份代码：ADOCO 5,160 ms / ref 2,278 ms（2.27×）。
-> 绝对值受容器 CPU 影响，只用来确认流程正确；正式数字以 Actions 为准。
+- **性能**：在各自项目的 Release 档下，ADOCO 的混音**不慢**（Tempest 单 hit 0.91×）；
+  两者差距的绝大部分来自"参考实现会丢弃重复 hit"这条规则，而不是混音循环本身。
+  早先"慢 3.7~5.5×"的结论源于给两侧统一 `-O2`，该结论已作废。
+- **时间轴**：修好参考实现的 `da` 归一化与同 floor `Bpm`+`Multiplier` 覆盖之后，
+  两个谱面都逐 tile 一致（≤ 1 采样）。
+- **音频**：ADOCO 是逐样本硬削波（Tempest 密集段 0.334% 饱和、动态范围 5.96 dB）；
+  参考实现是静态等功率预缩放（0 削波、12.25 dB），整体电平低约 23 dB，
+  它另有可选的 EBU R128 后处理来补响度。
 
 ## 目录
 
